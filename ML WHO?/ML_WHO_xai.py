@@ -72,7 +72,13 @@ def show_feature_engineering(df):
     explainer_lime = lime.lime_tabular.LimeTabularExplainer(
         sample_X.values, feature_names=sample_X.columns, class_names=["Class 0", "Class 1"], discretize_continuous=True
     )
+
+    # Check for NaN or Infinite values before explaining
     i = 0
+    if np.any(np.isnan(sample_X.values[i])) or np.any(np.isinf(sample_X.values[i])):
+        st.error("The sample contains invalid values (NaN or Infinite).")
+        return X, y  # Return early if invalid data
+    
     exp = explainer_lime.explain_instance(sample_X.values[i], model_for_shap.predict_proba, num_features=10)
     fig_lime = exp.as_pyplot_figure()
     st.pyplot(fig_lime)
