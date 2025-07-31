@@ -22,11 +22,13 @@ def show_feature_engineering(df):
     X = df.drop(columns=[target_col])
     y = df[target_col]
 
-    if y.dtype == 'object':
+    # Label encoding for categorical target
+    if y.dtype == 'object' or len(np.unique(y)) < 10:  # Categorical or small number of unique values
         le = LabelEncoder()
         y = le.fit_transform(y)
 
-    if pd.Series(y).dtype in ['float64', 'int64'] and pd.Series(y).nunique() > 20:
+    # If y is numeric and has more than 20 unique values, bin it into categories
+    if pd.api.types.is_numeric_dtype(y) and y.nunique() > 20:
         y = pd.cut(y, bins=3, labels=False)
         st.info("Target converted into 3 categories: Low, Medium, High.")
 
@@ -40,10 +42,10 @@ def show_feature_engineering(df):
     X_test = scaler.transform(X_test)
 
     # Sample for explanation
-    sample_X = pd.DataFrame(X_train[:100], columns=X.columns)
+    sample_X = pd.DataFrame(X_train[:100], columns=X.columns)  # Limit to 100 samples for testing
     sample_y = y_train[:100]
 
-    st.write("Training SHAP, LIME and Decision Tree on 100-sample subset...")
+    st.write("Training SHAP, LIME, and Decision Tree on a 100-sample subset...")
 
     # SHAP explanation
     model_for_shap = RandomForestClassifier().fit(sample_X, sample_y)
@@ -80,6 +82,11 @@ def show_feature_engineering(df):
     # Optional Feature Removal
     st.subheader("🧹 Optional Feature Removal")
     cols_to_remove = st.multiselect("Select columns to remove from training", options=list(X.columns))
+
+    # Prevent target column from being removed
+    if target_col in cols_to_remove:
+        st.warning("You cannot remove the target column.")
+        cols_to_remove.remove(target_col)
 
     if cols_to_remove:
         X = X.drop(columns=cols_to_remove)
