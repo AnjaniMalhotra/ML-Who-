@@ -36,9 +36,11 @@ def show_feature_engineering(df):
         y = le.fit_transform(y)
 
     # If y is numeric and has more than 20 unique values, bin it into categories
-    if pd.api.types.is_numeric_dtype(y) and y.nunique() > 20:
-        y = pd.cut(y, bins=3, labels=False)
-        st.info("Target converted into 3 categories: Low, Medium, High.")
+    if pd.api.types.is_numeric_dtype(y):
+        y = pd.Series(y)  # Convert to pandas Series to use .nunique()
+        if y.nunique() > 20:
+            y = pd.cut(y, bins=3, labels=False)
+            st.info("Target converted into 3 categories: Low, Medium, High.")
 
     X = pd.get_dummies(X)
 
