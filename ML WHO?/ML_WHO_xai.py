@@ -57,6 +57,12 @@ def show_feature_engineering(df):
 
     st.write("Training SHAP, LIME, and Decision Tree on a 100-sample subset...")
 
+    # Check for NaN or Infinite values in the sample data
+    nan_inf_check = sample_X.isna().sum() + np.isinf(sample_X).sum()
+    if nan_inf_check.any():
+        st.error(f"Invalid values (NaN or Infinite) found in the following columns: {nan_inf_check[nan_inf_check > 0]}")
+        sample_X = sample_X.dropna().replace([np.inf, -np.inf], 0)  # Drop or replace NaNs/Infs
+    
     # SHAP explanation
     model_for_shap = RandomForestClassifier().fit(sample_X, sample_y)
     explainer_shap = shap.TreeExplainer(model_for_shap)
