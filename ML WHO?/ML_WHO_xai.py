@@ -22,6 +22,14 @@ def show_feature_engineering(df):
     X = df.drop(columns=[target_col])
     y = df[target_col]
 
+    # Ensure that y is uniformly a string or numeric
+    if y.dtype == 'object':
+        # Convert strings to lowercase to avoid case-sensitive issues
+        y = y.str.lower()
+    elif pd.api.types.is_numeric_dtype(y):
+        # If numeric, ensure no NaNs (optional step)
+        y = y.fillna(0)
+
     # Label encoding for categorical target
     if y.dtype == 'object' or len(np.unique(y)) < 10:  # Categorical or small number of unique values
         le = LabelEncoder()
