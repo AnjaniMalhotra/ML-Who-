@@ -12,74 +12,85 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 
 def show_feature_engineering(df):
-    # Initialize variables to prevent 'None' errors
-    X, y = None, None  
-
     st.header("🧠 Feature Engineering with XAI")
-    
+
+    # Select target column
     target_col = st.selectbox("Select the target column", df.columns)
 
+    # Separate features and target
     X = df.drop(columns=[target_col])
     y = df[target_col]
 
-    # Ensure that y is uniformly a string or numeric
+    # Process target column
     if y.dtype == 'object':
-        # Convert strings to lowercase to avoid case-sensitive issues
         y = y.str.lower()
     elif pd.api.types.is_numeric_dtype(y):
-        # If numeric, ensure no NaNs (optional step)
         y = y.fillna(0)
 
-    # Label encoding for categorical target
-    if y.dtype == 'object' or len(np.unique(y)) < 10:  # Categorical or small number of unique values
+    # Label encode categorical target or small unique values
+    if y.dtype == 'object' or y.nunique() < 10:
         le = LabelEncoder()
         y = le.fit_transform(y)
 
-    # If y is numeric and has more than 20 unique values, bin it into categories
+    # Bin high-cardinality numeric targets into categories
     if pd.api.types.is_numeric_dtype(y):
-        y = pd.Series(y)  # Convert to pandas Series to use .nunique()
+        y = pd.Series(y)
         if y.nunique() > 20:
             y = pd.cut(y, bins=3, labels=False)
             st.info("Target converted into 3 categories: Low, Medium, High.")
 
+    # Encode categorical features
     X = pd.get_dummies(X)
 
-    # Train-test split and scaling
+    # Store column names before scaling
+    feature_columns = X.columns
+
+    # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
+    # Scale features
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-    # Sample for explanation
-    sample_X = pd.DataFrame(X_train[:100], columns=X.columns)  # Limit to 100 samples for testing
+    # Prepare sample for explanation
+    sample_X = pd.DataFrame(X_train_scaled[:100], columns=feature_columns)
     sample_y = y_train[:100]
 
     st.write("Training SHAP, LIME, and Decision Tree on a 100-sample subset...")
 
     # SHAP explanation
+    st.subheader("🔍 SHAP Summary Plot")
     model_for_shap = RandomForestClassifier().fit(sample_X, sample_y)
     explainer_shap = shap.TreeExplainer(model_for_shap)
     shap_values = explainer_shap.shap_values(sample_X)
 
-    st.subheader("🔍 SHAP Summary Plot")
     fig, ax = plt.subplots()
     shap.summary_plot(shap_values, sample_X, plot_type="bar", show=False)
     st.pyplot(fig)
 
     # LIME explanation
     st.subheader("🔍 LIME Explanation - Random Forest Model")
+
+    # Check for invalid values in sample
+    if sample_X.isnull().values.any() or np.isinf(sample_X.values).any():
+        st.error("The sample contains invalid values (NaN or Infinite). Please clean your data.")
+        return X, y
+
     explainer_lime = lime.lime_tabular.LimeTabularExplainer(
-        sample_X.values, feature_names=sample_X.columns, class_names=["Class 0", "Class 1"], discretize_continuous=True
+        training_data=sample_X.values,
+        feature_names=sample_X.columns.tolist(),
+        class_names=["Class 0", "Class 1"],
+        discretize_continuous=True
     )
 
-    # Check for NaN or Infinite values before explaining
+    # Explain first instance
     i = 0
-    if np.any(np.isnan(sample_X.values[i])) or np.any(np.isinf(sample_X.values[i])):
-        st.error("The sample contains invalid values (NaN or Infinite).")
-        return X, y  # Return early if invalid data
-    
-    exp = explainer_lime.explain_instance(sample_X.values[i], model_for_shap.predict_proba, num_features=10)
+    exp = explainer_lime.explain_instance(
+        data_row=sample_X.values[i],
+        predict_fn=model_for_shap.predict_proba,
+        num_features=10
+    )
     fig_lime = exp.as_pyplot_figure()
     st.pyplot(fig_lime)
 
@@ -99,7 +110,6 @@ def show_feature_engineering(df):
     st.subheader("🧹 Optional Feature Removal")
     cols_to_remove = st.multiselect("Select columns to remove from training", options=list(X.columns))
 
-    # Prevent target column from being removed
     if target_col in cols_to_remove:
         st.warning("You cannot remove the target column.")
         cols_to_remove.remove(target_col)
@@ -119,4 +129,4 @@ def show_feature_engineering(df):
         mime='text/csv'
     )
 
-    return X, y  # Always return X, y after processing
+    return X, y
