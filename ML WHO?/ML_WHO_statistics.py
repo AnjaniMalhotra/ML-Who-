@@ -18,13 +18,20 @@ def classify_features(df):
     return categorical, numerical_discrete, numerical_continuous
 
 def clean_dataset(df):
-    # Drop duplicates
+    # Drop duplicate rows
     df_cleaned = df.drop_duplicates()
 
-    # Fill missing values (numerical columns) with median
-    for col in df_cleaned.select_dtypes(include=['float64', 'int64']).columns:
+    # Fill missing values in numeric columns with median
+    numeric_cols = df_cleaned.select_dtypes(include=['float64', 'int64']).columns
+    for col in numeric_cols:
         median_val = df_cleaned[col].median()
         df_cleaned[col] = df_cleaned[col].fillna(median_val)
+
+    # Fill missing values in categorical columns with mode
+    categorical_cols = df_cleaned.select_dtypes(include=['object']).columns
+    for col in categorical_cols:
+        mode_val = df_cleaned[col].mode()[0] if not df_cleaned[col].mode().empty else "Unknown"
+        df_cleaned[col] = df_cleaned[col].fillna(mode_val)
 
     return df_cleaned
 
@@ -70,7 +77,7 @@ def show_statistics(df):
 
     # --- Cleaned Dataset Section ---
     st.markdown("---")
-    st.header("Cleaned Dataset (Duplicates Removed & Missing Values Filled)")
+    st.header("🧹 Cleaned Dataset (Duplicates Removed & Missing Values Filled)")
 
     df_cleaned = clean_dataset(df)
 
@@ -83,5 +90,4 @@ def show_statistics(df):
     st.subheader("Preview of Cleaned Data")
     st.dataframe(df_cleaned.head())
 
-    # Optional: Return cleaned data for further use in app
     return df_cleaned
