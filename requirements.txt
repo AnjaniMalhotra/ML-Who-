@@ -4,7 +4,7 @@ numpy
 scikit-learn
 matplotlib
 seaborn
-shap
+shap==0.50.0
 lime
 xgboost
 lightgbm
