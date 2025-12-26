@@ -16,7 +16,7 @@ def show_feature_engineering(df):
     st.header("🧠 Feature Engineering with XAI")
 
     # --------------------------------------------------
-    # BASIC DATA CHECKS
+    # ALWAYS RENDER SOMETHING (CRITICAL FOR CLOUD)
     # --------------------------------------------------
     st.write("Dataset shape:", df.shape)
     st.write("Columns:", df.columns.tolist())
@@ -26,16 +26,18 @@ def show_feature_engineering(df):
     # --------------------------------------------------
     target_col = st.selectbox(
         "Select the target column",
-        options=["-- Select target column --"] + list(df.columns)
+        ["-- Select target column --"] + list(df.columns)
     )
 
     if target_col == "-- Select target column --":
         st.info("Please select a target column to proceed.")
-        return None, None
+        return
 
-    if not st.button("🚀 Run Feature Engineering"):
+    run_fe = st.button("🚀 Run Feature Engineering")
+
+    if not run_fe:
         st.warning("Click the button to start feature engineering.")
-        return None, None
+        return
 
     # --------------------------------------------------
     # SPLIT FEATURES & TARGET
@@ -44,7 +46,7 @@ def show_feature_engineering(df):
     y = df[target_col]
 
     # --------------------------------------------------
-    # TARGET CLEANING (ROBUST)
+    # TARGET CLEANING (ROBUST & SAFE)
     # --------------------------------------------------
     if y.dtype == "object":
         y = y.astype(str).str.lower().fillna("unknown")
@@ -59,21 +61,29 @@ def show_feature_engineering(df):
         le = LabelEncoder()
         y = pd.Series(le.fit_transform(y))
 
-    y = pd.Series(y)  # force pandas Series
+    y = pd.Series(y)
 
     # --------------------------------------------------
     # SAFE BINNING FOR HIGH-CARDINALITY TARGETS
     # --------------------------------------------------
     if pd.api.types.is_numeric_dtype(y) and y.nunique() > 20:
         try:
-            y_binned = pd.qcut(y, q=3, labels=False, duplicates="drop")
+            y_binned = pd.qcut(
+                y,
+                q=3,
+                labels=False,
+                duplicates="drop"
+            )
 
             if y_binned.nunique() >= 2:
                 y = y_binned.fillna(0).astype(int)
-                st.info(f"Target binned into {y.nunique()} quantile-based classes.")
+                st.info(
+                    f"Target binned into {y.nunique()} quantile-based classes."
+                )
             else:
-                st.warning("Target binning skipped due to insufficient unique values.")
-
+                st.warning(
+                    "Target binning skipped due to insufficient unique values."
+                )
         except Exception as e:
             st.warning(f"Target binning skipped: {e}")
 
@@ -102,17 +112,30 @@ def show_feature_engineering(df):
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
 
-    sample_X = pd.DataFrame(X_train_scaled[:100], columns=feature_columns)
+    sample_X = pd.DataFrame(
+        X_train_scaled[:100],
+        columns=feature_columns
+    )
     sample_y = pd.Series(y_train[:100])
 
     st.success("Feature engineering completed successfully.")
 
+    # --------------------------------------------------
+    # SAVE TO SESSION STATE (IMPORTANT)
+    # --------------------------------------------------
+    st.session_state["X"] = X
+    st.session_state["y"] = y
+    st.session_state["target"] = target_col
+
     # ==================================================
-    # SHAP
+    # SHAP EXPLANATION
     # ==================================================
     st.subheader("🔍 SHAP Feature Importance")
 
-    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf_model = RandomForestClassifier(
+        n_estimators=100,
+        random_state=42
+    )
     rf_model.fit(sample_X, sample_y)
 
     explainer = shap.TreeExplainer(rf_model)
@@ -120,14 +143,24 @@ def show_feature_engineering(df):
 
     fig_shap, _ = plt.subplots()
     if isinstance(shap_values, list):
-        shap.summary_plot(shap_values[0], sample_X, plot_type="bar", show=False)
+        shap.summary_plot(
+            shap_values[0],
+            sample_X,
+            plot_type="bar",
+            show=False
+        )
     else:
-        shap.summary_plot(shap_values, sample_X, plot_type="bar", show=False)
+        shap.summary_plot(
+            shap_values,
+            sample_X,
+            plot_type="bar",
+            show=False
+        )
 
     st.pyplot(fig_shap)
 
     # ==================================================
-    # LIME
+    # LIME EXPLANATION
     # ==================================================
     st.subheader("🔍 LIME Explanation")
 
@@ -149,16 +182,16 @@ def show_feature_engineering(df):
     st.pyplot(exp.as_pyplot_figure())
 
     # ==================================================
-    # DECISION TREE
+    # DECISION TREE FEATURE IMPORTANCE
     # ==================================================
     st.subheader("🌲 Decision Tree Feature Importance")
 
-    dt = DecisionTreeClassifier(random_state=42)
-    dt.fit(sample_X, sample_y)
+    dt_model = DecisionTreeClassifier(random_state=42)
+    dt_model.fit(sample_X, sample_y)
 
     importance_df = pd.DataFrame({
         "Feature": sample_X.columns,
-        "Importance": dt.feature_importances_
+        "Importance": dt_model.feature_importances_
     }).sort_values(by="Importance", ascending=False)
 
     fig_dt, ax_dt = plt.subplots(figsize=(10, 6))
@@ -168,10 +201,11 @@ def show_feature_engineering(df):
         data=importance_df.head(10),
         ax=ax_dt
     )
+    ax_dt.set_title("Top 10 Important Features")
     st.pyplot(fig_dt)
 
     # ==================================================
-    # DOWNLOAD DATASET
+    # DOWNLOAD MODIFIED DATASET
     # ==================================================
     final_df = X.copy()
     final_df[target_col] = y
@@ -182,5 +216,3 @@ def show_feature_engineering(df):
         "modified_dataset.csv",
         "text/csv"
     )
-
-    return X, y
