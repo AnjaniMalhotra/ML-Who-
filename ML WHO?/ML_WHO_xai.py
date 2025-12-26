@@ -1,132 +1,182 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 import shap
 import lime.lime_tabular
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
+
 
 def show_feature_engineering(df):
     st.header("🧠 Feature Engineering with XAI")
 
-    # Select target column
+    # -------------------------------
+    # Basic dataset checks
+    # -------------------------------
+    st.write("Dataset Shape:", df.shape)
+    st.write("Total Missing Values:", df.isnull().sum().sum())
+    st.write("Columns:", df.columns.tolist())
+
+    # -------------------------------
+    # Target selection
+    # -------------------------------
     target_col = st.selectbox("Select the target column", df.columns)
 
-    # Separate features and target
     X = df.drop(columns=[target_col])
     y = df[target_col]
 
-    # Process target column
-    if y.dtype == 'object':
-        y = y.str.lower()
-    elif pd.api.types.is_numeric_dtype(y):
-        y = y.fillna(0)
+    # -------------------------------
+    # Clean target variable
+    # -------------------------------
+    if y.dtype == "object":
+        y = y.astype(str).str.lower().fillna("unknown")
 
-    # Label encode categorical target or small unique values
-    if y.dtype == 'object' or y.nunique() < 10:
+    if pd.api.types.is_numeric_dtype(y):
+        y = pd.to_numeric(y, errors="coerce").fillna(0)
+
+    # Encode categorical or low-unique targets
+    if y.dtype == "object" or y.nunique() <= 10:
         le = LabelEncoder()
         y = le.fit_transform(y)
 
-    # Bin high-cardinality numeric targets into categories
-    if pd.api.types.is_numeric_dtype(y):
-        y = pd.Series(y)
-        if y.nunique() > 20:
-            y = pd.cut(y, bins=3, labels=False)
-            st.info("Target converted into 3 categories: Low, Medium, High.")
+    # Bin high-cardinality numeric targets
+    if pd.api.types.is_numeric_dtype(y) and y.nunique() > 20:
+        y = pd.qcut(y, q=3, labels=False)
+        y = pd.Series(y).fillna(0).astype(int)
+        st.info("Target binned into 3 quantile-based classes.")
 
-    # Encode categorical features
+    # -------------------------------
+    # Feature encoding
+    # -------------------------------
     X = pd.get_dummies(X)
 
-    # Store column names before scaling
+    # Clean features (VERY IMPORTANT)
+    X = X.replace([np.inf, -np.inf], np.nan)
+    X = X.fillna(0)
+
     feature_columns = X.columns
 
+    # -------------------------------
     # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # -------------------------------
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y if len(np.unique(y)) > 1 else None
+    )
 
-    # Scale features
+    # -------------------------------
+    # Scaling
+    # -------------------------------
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    # Prepare sample for explanation
+    # Use small sample for XAI (performance safe)
     sample_X = pd.DataFrame(X_train_scaled[:100], columns=feature_columns)
     sample_y = y_train[:100]
 
-    st.write("Training SHAP, LIME, and Decision Tree on a 100-sample subset...")
+    st.success("Feature engineering completed successfully.")
 
-    # SHAP explanation
-    st.subheader("🔍 SHAP Summary Plot")
-    model_for_shap = RandomForestClassifier().fit(sample_X, sample_y)
-    explainer_shap = shap.TreeExplainer(model_for_shap)
-    shap_values = explainer_shap.shap_values(sample_X)
+    # =====================================================
+    # SHAP EXPLANATION
+    # =====================================================
+    st.subheader("🔍 SHAP Feature Importance")
 
-    fig, ax = plt.subplots()
-    shap.summary_plot(shap_values, sample_X, plot_type="bar", show=False)
-    st.pyplot(fig)
+    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf_model.fit(sample_X, sample_y)
 
-    # LIME explanation
-    st.subheader("🔍 LIME Explanation - Random Forest Model")
+    explainer = shap.TreeExplainer(rf_model)
+    shap_values = explainer.shap_values(sample_X)
 
-    # Check for invalid values in sample
+    fig_shap, ax_shap = plt.subplots()
+
+    if isinstance(shap_values, list):
+        shap.summary_plot(shap_values[0], sample_X, plot_type="bar", show=False)
+    else:
+        shap.summary_plot(shap_values, sample_X, plot_type="bar", show=False)
+
+    st.pyplot(fig_shap)
+
+    # =====================================================
+    # LIME EXPLANATION
+    # =====================================================
+    st.subheader("🔍 LIME Explanation")
+
     if sample_X.isnull().values.any() or np.isinf(sample_X.values).any():
-        st.error("The sample contains invalid values (NaN or Infinite). Please clean your data.")
-        return X, y
+        st.error("Invalid values found in features. Cannot run LIME.")
+    else:
+        class_names = [f"Class {i}" for i in np.unique(sample_y)]
 
-    explainer_lime = lime.lime_tabular.LimeTabularExplainer(
-        training_data=sample_X.values,
-        feature_names=sample_X.columns.tolist(),
-        class_names=["Class 0", "Class 1"],
-        discretize_continuous=True
-    )
+        lime_explainer = lime.lime_tabular.LimeTabularExplainer(
+            training_data=sample_X.values,
+            feature_names=sample_X.columns.tolist(),
+            class_names=class_names,
+            discretize_continuous=True
+        )
 
-    # Explain first instance
-    i = 0
-    exp = explainer_lime.explain_instance(
-        data_row=sample_X.values[i],
-        predict_fn=model_for_shap.predict_proba,
-        num_features=10
-    )
-    fig_lime = exp.as_pyplot_figure()
-    st.pyplot(fig_lime)
+        exp = lime_explainer.explain_instance(
+            data_row=sample_X.values[0],
+            predict_fn=rf_model.predict_proba,
+            num_features=10
+        )
 
-    # Decision Tree Feature Importances
-    st.subheader("🌲 Decision Tree Feature Importances")
-    dt_model = DecisionTreeClassifier().fit(sample_X, sample_y)
-    importances = dt_model.feature_importances_
-    importance_df = pd.DataFrame({'Feature': sample_X.columns, 'Importance': importances})
-    importance_df = importance_df.sort_values(by='Importance', ascending=False)
+        fig_lime = exp.as_pyplot_figure()
+        st.pyplot(fig_lime)
+
+    # =====================================================
+    # DECISION TREE FEATURE IMPORTANCE
+    # =====================================================
+    st.subheader("🌲 Decision Tree Feature Importance")
+
+    dt_model = DecisionTreeClassifier(random_state=42)
+    dt_model.fit(sample_X, sample_y)
+
+    importance_df = pd.DataFrame({
+        "Feature": sample_X.columns,
+        "Importance": dt_model.feature_importances_
+    }).sort_values(by="Importance", ascending=False)
 
     fig_dt, ax_dt = plt.subplots(figsize=(10, 6))
-    sns.barplot(x='Importance', y='Feature', data=importance_df.head(10), ax=ax_dt, palette="coolwarm")
-    ax_dt.set_title("Top 10 Important Features by Decision Tree")
+    sns.barplot(
+        x="Importance",
+        y="Feature",
+        data=importance_df.head(10),
+        ax=ax_dt
+    )
+    ax_dt.set_title("Top 10 Important Features")
     st.pyplot(fig_dt)
 
-    # Optional Feature Removal
+    # =====================================================
+    # OPTIONAL FEATURE REMOVAL
+    # =====================================================
     st.subheader("🧹 Optional Feature Removal")
-    cols_to_remove = st.multiselect("Select columns to remove from training", options=list(X.columns))
 
-    if target_col in cols_to_remove:
-        st.warning("You cannot remove the target column.")
-        cols_to_remove.remove(target_col)
+    cols_to_remove = st.multiselect(
+        "Select features to remove",
+        options=list(X.columns)
+    )
 
     if cols_to_remove:
         X = X.drop(columns=cols_to_remove)
-        st.warning(f"Dropped columns: {cols_to_remove}")
+        st.warning(f"Removed columns: {cols_to_remove}")
 
-    # Option to download modified dataset
-    modified_df = X.copy()
-    modified_df[target_col] = y  # Add back target column
-    csv = modified_df.to_csv(index=False).encode('utf-8')
+    # =====================================================
+    # DOWNLOAD MODIFIED DATASET
+    # =====================================================
+    final_df = X.copy()
+    final_df[target_col] = y
+
+    csv = final_df.to_csv(index=False).encode("utf-8")
+
     st.download_button(
-        label="📅 Download Modified Dataset as CSV",
+        label="📥 Download Modified Dataset",
         data=csv,
-        file_name='modified_dataset.csv',
-        mime='text/csv'
+        file_name="modified_dataset.csv",
+        mime="text/csv"
     )
 
     return X, y
