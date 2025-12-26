@@ -22,32 +22,30 @@ def show_feature_engineering(df):
     st.write("Columns:", df.columns.tolist())
 
     # --------------------------------------------------
-    # TARGET SELECTION (NO AUTO-RUN)
+    # TARGET SELECTION (USER CONTROLLED)
     # --------------------------------------------------
     target_col = st.selectbox(
         "Select the target column",
         options=["-- Select target column --"] + list(df.columns)
     )
 
-    # Stop execution until user selects target
     if target_col == "-- Select target column --":
         st.info("Please select a target column to proceed.")
         return None, None
 
-    # Explicit user action
-    run_fe = st.button("🚀 Run Feature Engineering")
-
-    if not run_fe:
-        st.warning("Click 'Run Feature Engineering' to start processing.")
+    if not st.button("🚀 Run Feature Engineering"):
+        st.warning("Click the button to start feature engineering.")
         return None, None
 
     # --------------------------------------------------
-    # FEATURE ENGINEERING STARTS HERE
+    # SPLIT FEATURES & TARGET
     # --------------------------------------------------
     X = df.drop(columns=[target_col])
     y = df[target_col]
 
-    # ---------------- Target Cleaning ----------------
+    # --------------------------------------------------
+    # TARGET CLEANING (ROBUST)
+    # --------------------------------------------------
     if y.dtype == "object":
         y = y.astype(str).str.lower().fillna("unknown")
 
@@ -56,24 +54,40 @@ def show_feature_engineering(df):
     except Exception:
         pass
 
+    # Encode categorical / low-cardinality targets
     if y.dtype == "object" or y.nunique() <= 10:
         le = LabelEncoder()
         y = pd.Series(le.fit_transform(y))
 
-    y = pd.Series(y)
+    y = pd.Series(y)  # force pandas Series
 
+    # --------------------------------------------------
+    # SAFE BINNING FOR HIGH-CARDINALITY TARGETS
+    # --------------------------------------------------
     if pd.api.types.is_numeric_dtype(y) and y.nunique() > 20:
-        y = pd.qcut(y, q=3, labels=False)
-        y = y.fillna(0).astype(int)
-        st.info("Target binned into 3 quantile-based classes.")
+        try:
+            y_binned = pd.qcut(y, q=3, labels=False, duplicates="drop")
 
-    # ---------------- Feature Encoding ----------------
+            if y_binned.nunique() >= 2:
+                y = y_binned.fillna(0).astype(int)
+                st.info(f"Target binned into {y.nunique()} quantile-based classes.")
+            else:
+                st.warning("Target binning skipped due to insufficient unique values.")
+
+        except Exception as e:
+            st.warning(f"Target binning skipped: {e}")
+
+    # --------------------------------------------------
+    # FEATURE ENCODING
+    # --------------------------------------------------
     X = pd.get_dummies(X)
     X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
 
     feature_columns = X.columns
 
-    # ---------------- Train-Test Split ----------------
+    # --------------------------------------------------
+    # TRAIN-TEST SPLIT
+    # --------------------------------------------------
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -82,7 +96,9 @@ def show_feature_engineering(df):
         stratify=y if y.nunique() > 1 else None
     )
 
-    # ---------------- Scaling ----------------
+    # --------------------------------------------------
+    # SCALING
+    # --------------------------------------------------
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
 
