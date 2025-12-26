@@ -16,7 +16,7 @@ def show_feature_engineering(df):
     st.header("🧠 Feature Engineering with XAI")
 
     # --------------------------------------------------
-    # ALWAYS RENDER SOMETHING (CRITICAL FOR CLOUD)
+    # BASIC INFO (ALWAYS RENDER SOMETHING)
     # --------------------------------------------------
     st.write("Dataset shape:", df.shape)
     st.write("Columns:", df.columns.tolist())
@@ -33,9 +33,7 @@ def show_feature_engineering(df):
         st.info("Please select a target column to proceed.")
         return
 
-    run_fe = st.button("🚀 Run Feature Engineering")
-
-    if not run_fe:
+    if not st.button("🚀 Run Feature Engineering"):
         st.warning("Click the button to start feature engineering.")
         return
 
@@ -46,57 +44,40 @@ def show_feature_engineering(df):
     y = df[target_col]
 
     # --------------------------------------------------
-    # TARGET CLEANING (ROBUST & SAFE)
+    # TARGET VALIDATION (FINAL FIX)
     # --------------------------------------------------
-    if y.dtype == "object":
-        y = y.astype(str).str.lower().fillna("unknown")
-
-    try:
-        y = pd.to_numeric(y)
-    except Exception:
-        pass
-
-    # Encode categorical / low-cardinality targets
-    if y.dtype == "object" or y.nunique() <= 10:
-        le = LabelEncoder()
-        y = pd.Series(le.fit_transform(y))
-
-    y = pd.Series(y)
+    if pd.api.types.is_numeric_dtype(y):
+        st.error(
+            "❌ Numeric targets are NOT supported in XAI mode.\n\n"
+            "Please select a categorical target such as:\n"
+            "- Payment Status\n"
+            "- Card Order Status\n"
+            "- Gateway\n"
+            "- Company Name\n"
+            "- Month"
+        )
+        st.stop()
 
     # --------------------------------------------------
-    # SAFE BINNING FOR HIGH-CARDINALITY TARGETS
+    # TARGET CLEANING (CATEGORICAL ONLY)
     # --------------------------------------------------
-    if pd.api.types.is_numeric_dtype(y) and y.nunique() > 20:
-        try:
-            y_binned = pd.qcut(
-                y,
-                q=3,
-                labels=False,
-                duplicates="drop"
-            )
+    y = y.astype(str).str.lower().fillna("unknown")
 
-            if y_binned.nunique() >= 2:
-                y = y_binned.fillna(0).astype(int)
-                st.info(
-                    f"Target binned into {y.nunique()} quantile-based classes."
-                )
-            else:
-                st.warning(
-                    "Target binning skipped due to insufficient unique values."
-                )
-        except Exception as e:
-            st.warning(f"Target binning skipped: {e}")
+    le = LabelEncoder()
+    y = pd.Series(le.fit_transform(y))
 
     # --------------------------------------------------
     # FEATURE ENCODING
     # --------------------------------------------------
     X = pd.get_dummies(X)
-    X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    X = X.replace([np.inf, -np.inf], np.nan)
+    X = X.fillna(0)
 
     feature_columns = X.columns
 
     # --------------------------------------------------
-    # TRAIN-TEST SPLIT
+    # TRAIN–TEST SPLIT
     # --------------------------------------------------
     X_train, X_test, y_train, y_test = train_test_split(
         X,
@@ -112,6 +93,7 @@ def show_feature_engineering(df):
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
 
+    # Small subset for XAI (CLOUD SAFE)
     sample_X = pd.DataFrame(
         X_train_scaled[:100],
         columns=feature_columns
@@ -142,6 +124,7 @@ def show_feature_engineering(df):
     shap_values = explainer.shap_values(sample_X)
 
     fig_shap, _ = plt.subplots()
+
     if isinstance(shap_values, list):
         shap.summary_plot(
             shap_values[0],
